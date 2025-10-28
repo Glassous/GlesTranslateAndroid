@@ -51,6 +51,8 @@ fun TranslationApp() {
     val multiModalEnabled by viewModel.multiModalEnabled.collectAsState()
     val translationResult by viewModel.translationResult.collectAsState()
     val isTranslating by viewModel.isTranslating.collectAsState()
+    val recognitionResult by viewModel.recognitionResult.collectAsState()
+    val isRecognizing by viewModel.isRecognizing.collectAsState()
     
     NavHost(
         navController = navController,
@@ -67,6 +69,9 @@ fun TranslationApp() {
                     translationResult = translationResult,
                     isTranslating = isTranslating,
                     aiConfigEnabled = aiConfigEnabled,
+                    multiModalEnabled = multiModalEnabled,
+                    recognitionResult = recognitionResult,
+                    isRecognizing = isRecognizing,
                     onTranslate = { sourceText, targetLanguageCode ->
                         viewModel.translate(sourceText, targetLanguageCode)
                     },
@@ -75,7 +80,10 @@ fun TranslationApp() {
                     },
                 onDeleteHistoryItem = { id ->
                     viewModel.deleteHistoryItem(id)
-                }
+                },
+                onRecognizeImage = { uri -> viewModel.recognizeImage(uri) },
+                onRecognizeAudio = { uri -> viewModel.recognizeAudio(uri) },
+                onClearRecognition = { viewModel.clearRecognitionResult() }
             )
         }
         

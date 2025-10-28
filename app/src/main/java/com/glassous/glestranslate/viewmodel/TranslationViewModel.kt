@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.glassous.glestranslate.data.*
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Base64
 import com.glassous.glestranslate.data.appDataStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +48,13 @@ class TranslationViewModel(private val context: Context) : ViewModel() {
     
     private val _translationResult = MutableStateFlow("")
     val translationResult: StateFlow<String> = _translationResult.asStateFlow()
+
+    // 识别状态与结果
+    private val _isRecognizing = MutableStateFlow(false)
+    val isRecognizing: StateFlow<Boolean> = _isRecognizing.asStateFlow()
+
+    private val _recognitionResult = MutableStateFlow("")
+    val recognitionResult: StateFlow<String> = _recognitionResult.asStateFlow()
     
     init {
         // 从 DataStore 加载持久化数据
@@ -193,6 +203,10 @@ class TranslationViewModel(private val context: Context) : ViewModel() {
         _translationResult.value = ""
     }
 
+    fun clearRecognitionResult() {
+        _recognitionResult.value = ""
+    }
+
     fun updateAiConfigEnabled(enabled: Boolean) {
         _aiConfigEnabled.value = enabled
         if (!enabled) {
@@ -222,6 +236,121 @@ class TranslationViewModel(private val context: Context) : ViewModel() {
             dataStore.updateData { app ->
                 app.copy(translationHistory = app.translationHistory.filter { it.id != id })
             }
+        }
+    }
+
+    /**
+     * 图片识别：根据设置选择内置 API 或多模态流式识别
+     */
+    fun recognizeImage(uri: Uri) {
+        viewModelScope.launch {
+            _recognitionResult.value = ""
+            _isRecognizing.value = true
+            try {
+                val bytes = readBytesFromUri(uri)
+                val mime = getMimeTypeFromUri(uri) ?: "image/jpeg"
+                val filename = getDisplayNameFromUri(uri) ?: "image.jpg"
+
+                if (_aiConfigEnabled.value && _multiModalEnabled.value) {
+                    val cfg = _aiConfig.value
+                    require(cfg.baseUrl.isNotBlank()) { "自定义AI Base URL 未配置" }
+                    require(cfg.apiKey.isNotBlank()) { "自定义AI API Key 未配置" }
+                    require(cfg.multiModalModel.isNotBlank()) { "自定义AI 多模态模型未配置" }
+
+                    val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    // 流式输出：增量追加到识别结果
+                    com.glassous.glestranslate.network.CustomOpenAIService.streamRecognizeImage(
+                        baseUrl = cfg.baseUrl,
+                        apiKey = cfg.apiKey,
+                        model = cfg.multiModalModel,
+                        imageBase64 = b64,
+                        imageMime = mime
+                    ) { delta ->
+                        _recognitionResult.value += delta
+                    }
+                } else {
+                    // 内置 API：一次性返回
+                    val result = com.glassous.glestranslate.network.OcrService.recognizeImage(
+                        imageBytes = bytes,
+                        filename = filename
+                    )
+                    _recognitionResult.value = result
+                }
+            } catch (e: Exception) {
+                _recognitionResult.value = "识别失败: ${e.message}"
+            } finally {
+                _isRecognizing.value = false
+            }
+        }
+    }
+
+    /**
+     * 音频识别：根据设置选择内置 API 或多模态流式识别
+     */
+    fun recognizeAudio(uri: Uri) {
+        viewModelScope.launch {
+            _recognitionResult.value = ""
+            _isRecognizing.value = true
+            try {
+                val bytes = readBytesFromUri(uri)
+                val mime = getMimeTypeFromUri(uri) ?: "audio/mpeg"
+                val filename = getDisplayNameFromUri(uri) ?: "audio.mp3"
+
+                if (_aiConfigEnabled.value && _multiModalEnabled.value) {
+                    val cfg = _aiConfig.value
+                    require(cfg.baseUrl.isNotBlank()) { "自定义AI Base URL 未配置" }
+                    require(cfg.apiKey.isNotBlank()) { "自定义AI API Key 未配置" }
+                    require(cfg.multiModalModel.isNotBlank()) { "自定义AI 多模态模型未配置" }
+
+                    // 解析格式，例如 audio/mpeg -> mpeg
+                    val audioFormat = mime.substringAfter('/', missingDelimiterValue = "mpeg")
+                    val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    com.glassous.glestranslate.network.CustomOpenAIService.streamRecognizeAudio(
+                        baseUrl = cfg.baseUrl,
+                        apiKey = cfg.apiKey,
+                        model = cfg.multiModalModel,
+                        audioBase64 = b64,
+                        audioFormat = audioFormat
+                    ) { delta ->
+                        _recognitionResult.value += delta
+                    }
+                } else {
+                    val result = com.glassous.glestranslate.network.OcrService.recognizeAudio(
+                        audioBytes = bytes,
+                        filename = filename
+                    )
+                    _recognitionResult.value = result
+                }
+            } catch (e: Exception) {
+                _recognitionResult.value = "识别失败: ${e.message}"
+            } finally {
+                _isRecognizing.value = false
+            }
+        }
+    }
+
+    // Helpers
+    private fun readBytesFromUri(uri: Uri): ByteArray {
+        val cr = context.contentResolver
+        val input = cr.openInputStream(uri) ?: throw IllegalArgumentException("无法打开文件: $uri")
+        return input.use { it.readBytes() }
+    }
+
+    private fun getMimeTypeFromUri(uri: Uri): String? {
+        return context.contentResolver.getType(uri)
+    }
+
+    private fun getDisplayNameFromUri(uri: Uri): String? {
+        val cr = context.contentResolver
+        return try {
+            cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) cursor.getString(idx) else null
+                } else null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 }

@@ -91,6 +91,132 @@ object CustomOpenAIService {
         return sb.toString()
     }
 
+    /**
+     * Stream audio transcription using OpenAI-compatible multimodal Chat Completions.
+     * The audio is embedded as base64 in the user content. Delta chunks are parsed via SSE.
+     */
+    suspend fun streamRecognizeAudio(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        audioBase64: String,
+        audioFormat: String,
+        onDelta: (String) -> Unit
+    ): String {
+        val url = buildChatCompletionsUrl(baseUrl)
+        val prompt = "请识别这个音频文件中的文字内容，直接返回识别结果，不要添加任何解释。"
+
+        val payload = buildJsonObject {
+            put("model", model)
+            put("stream", true)
+            put("messages", buildJsonArray {
+                add(buildJsonObject {
+                    put("role", "user")
+                    put("content", buildJsonArray {
+                        add(buildJsonObject {
+                            put("type", "input_text")
+                            put("text", prompt)
+                        })
+                        add(buildJsonObject {
+                            put("type", "input_audio")
+                            put("audio", buildJsonObject {
+                                put("data", audioBase64)
+                                put("format", audioFormat)
+                            })
+                        })
+                    })
+                })
+            })
+        }
+
+        val response = client.post(url) {
+            header("Authorization", "Bearer $apiKey")
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            accept(ContentType.parse("text/event-stream"))
+            header("User-Agent", "GlesTranslate/1.0 (Android; Ktor)")
+            setBody(payload)
+        }
+
+        val channel: ByteReadChannel = response.bodyAsChannel()
+        val sb = StringBuilder()
+        while (!channel.isClosedForRead) {
+            val line = channel.readUTF8Line() ?: break
+            if (line.isBlank()) continue
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+            if (data == "[DONE]") break
+            val deltaText = parseDeltaText(data)
+            if (deltaText.isNotEmpty()) {
+                sb.append(deltaText)
+                onDelta(deltaText)
+            }
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Stream image OCR using OpenAI-compatible multimodal Chat Completions.
+     * The image is embedded as a data URL in the user content. Delta chunks are parsed via SSE.
+     */
+    suspend fun streamRecognizeImage(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        imageBase64: String,
+        imageMime: String,
+        onDelta: (String) -> Unit
+    ): String {
+        val url = buildChatCompletionsUrl(baseUrl)
+        val prompt = "请识别这张图片中的文字内容，直接返回识别结果，不要添加任何解释。"
+
+        val dataUrl = "data:$imageMime;base64,$imageBase64"
+        val payload = buildJsonObject {
+            put("model", model)
+            put("stream", true)
+            put("messages", buildJsonArray {
+                add(buildJsonObject {
+                    put("role", "user")
+                    put("content", buildJsonArray {
+                        add(buildJsonObject {
+                            put("type", "input_text")
+                            put("text", prompt)
+                        })
+                        add(buildJsonObject {
+                            put("type", "input_image")
+                            put("image", buildJsonObject {
+                                put("url", dataUrl)
+                            })
+                        })
+                    })
+                })
+            })
+        }
+
+        val response = client.post(url) {
+            header("Authorization", "Bearer $apiKey")
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            accept(ContentType.parse("text/event-stream"))
+            header("User-Agent", "GlesTranslate/1.0 (Android; Ktor)")
+            setBody(payload)
+        }
+
+        val channel: ByteReadChannel = response.bodyAsChannel()
+        val sb = StringBuilder()
+        while (!channel.isClosedForRead) {
+            val line = channel.readUTF8Line() ?: break
+            if (line.isBlank()) continue
+            if (!line.startsWith("data:")) continue
+            val data = line.removePrefix("data:").trim()
+            if (data == "[DONE]") break
+            val deltaText = parseDeltaText(data)
+            if (deltaText.isNotEmpty()) {
+                sb.append(deltaText)
+                onDelta(deltaText)
+            }
+        }
+        return sb.toString()
+    }
+
     private fun buildChatCompletionsUrl(baseUrl: String): String {
         val trimmed = baseUrl.trim().trimEnd('/')
         return when {

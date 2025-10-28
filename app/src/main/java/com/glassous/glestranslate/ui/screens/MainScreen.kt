@@ -1,6 +1,10 @@
 package com.glassous.glestranslate.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,6 +18,9 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
@@ -26,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.core.content.FileProvider
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -38,6 +46,7 @@ import com.glassous.glestranslate.data.PredefinedLanguages
 import com.glassous.glestranslate.data.TranslationHistoryItem
 import com.glassous.glestranslate.ui.theme.aladinFontFamily
 import kotlinx.coroutines.launch
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -49,9 +58,15 @@ fun MainScreen(
     translationResult: String = "",
     isTranslating: Boolean = false,
     aiConfigEnabled: Boolean = false,
+    multiModalEnabled: Boolean = false,
+    recognitionResult: String = "",
+    isRecognizing: Boolean = false,
     onTranslate: (String, String) -> Unit = { _, _ -> },
     onLanguageSelected: (SelectedLanguage) -> Unit = {},
-    onDeleteHistoryItem: (Long) -> Unit = { _ -> }
+    onDeleteHistoryItem: (Long) -> Unit = { _ -> },
+    onRecognizeImage: (android.net.Uri) -> Unit = {},
+    onRecognizeAudio: (android.net.Uri) -> Unit = {},
+    onClearRecognition: () -> Unit = {}
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -60,6 +75,7 @@ fun MainScreen(
     var translatedText by remember { mutableStateOf("") }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var confirmDeleteId by remember { mutableStateOf<Long?>(null) }
+    var showRecognitionDialog by remember { mutableStateOf(false) }
     
     val allLanguages = PredefinedLanguages.languages + customLanguages
 
@@ -351,6 +367,101 @@ fun MainScreen(
                                 }
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        // 识别动作按钮：语音、拍照、图片上传
+                        val context = LocalContext.current
+                        var latestPhotoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+                        var pendingPhotoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+                        fun createTempImageUri(): android.net.Uri {
+                            val imagesDir = File(context.cacheDir, "images")
+                            if (!imagesDir.exists()) imagesDir.mkdirs()
+                            val file = File.createTempFile("capture_", ".jpg", imagesDir)
+                            return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                        }
+
+                        val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+                            if (success) {
+                                latestPhotoUri?.let {
+                                    onClearRecognition()
+                                    showRecognitionDialog = true
+                                    onRecognizeImage(it)
+                                }
+                            }
+                        }
+
+                        val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                            if (granted) {
+                                pendingPhotoUri?.let { uri ->
+                                    latestPhotoUri = uri
+                                    takePictureLauncher.launch(uri)
+                                }
+                            } else {
+                                // 提示权限未授予
+                                scope.launch { snackbarHostState.showSnackbar("未授予相机权限") }
+                            }
+                        }
+
+                        val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                            if (uri != null) {
+                                onClearRecognition()
+                                showRecognitionDialog = true
+                                onRecognizeImage(uri)
+                            }
+                        }
+
+                        val pickAudioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                            if (uri != null) {
+                                onClearRecognition()
+                                showRecognitionDialog = true
+                                onRecognizeAudio(uri)
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { pickAudioLauncher.launch("audio/*") },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Filled.Mic, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("语音")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val permissionGranted = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.CAMERA
+                                    ) == PackageManager.PERMISSION_GRANTED
+
+                                    val newUri = createTempImageUri()
+                                    if (permissionGranted) {
+                                        latestPhotoUri = newUri
+                                        takePictureLauncher.launch(newUri)
+                                    } else {
+                                        pendingPhotoUri = newUri
+                                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Filled.PhotoCamera, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("拍照")
+                            }
+                            OutlinedButton(
+                                onClick = { pickImageLauncher.launch("image/*") },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Filled.Image, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("图片")
+                            }
+                        }
                     }
                 }
                 
@@ -429,6 +540,92 @@ fun MainScreen(
                     TextButton(onClick = { confirmDeleteId = null }) { Text("取消") }
                 }
             )
+        }
+
+        // 识别结果弹窗
+        if (showRecognitionDialog) {
+            Dialog(onDismissRequest = { showRecognitionDialog = false }) {
+                Card {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .heightIn(min = 240.dp, max = 480.dp)
+                    ) {
+                        Text(
+                            text = "识别结果",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Divider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Box {
+                            OutlinedTextField(
+                                value = recognitionResult,
+                                onValueChange = {},
+                                placeholder = { Text("识别结果将显示在这里...") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 120.dp),
+                                maxLines = 6,
+                                readOnly = true
+                            )
+
+                            // 加载动画：仅在未开启多模态或未使用多模态时显示
+                            val showRecLoader = (!aiConfigEnabled || !multiModalEnabled) && isRecognizing
+                            if (showRecLoader) {
+                                val contextRec = LocalContext.current
+                                val fallbackIndicatorRec = MaterialTheme.colorScheme.primary
+                                val fallbackContainerRec = MaterialTheme.colorScheme.surfaceVariant
+                                val indicatorColorRec = remember(contextRec, fallbackIndicatorRec) {
+                                    runCatching {
+                                        Color(ContextCompat.getColor(contextRec, android.R.color.system_accent1_600))
+                                    }.getOrElse { fallbackIndicatorRec }
+                                }
+                                val containerColorRec = remember(contextRec, fallbackContainerRec) {
+                                    runCatching {
+                                        Color(ContextCompat.getColor(contextRec, android.R.color.system_accent1_100))
+                                    }.getOrElse { fallbackContainerRec }
+                                }
+
+                                Box(
+                                    modifier = Modifier.align(Alignment.Center)
+                                ) {
+                                    ContainedLoadingIndicator(
+                                        modifier = Modifier.size(48.dp),
+                                        containerColor = containerColorRec,
+                                        indicatorColor = indicatorColorRec
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Divider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            TextButton(onClick = {
+                                showRecognitionDialog = false
+                            }) { Text("关闭") }
+                            Button(
+                                enabled = recognitionResult.isNotBlank(),
+                                onClick = {
+                                    if (recognitionResult.isNotBlank()) {
+                                        // 插入到输入框
+                                        sourceText = recognitionResult
+                                        showRecognitionDialog = false
+                                    }
+                                }
+                            ) { Text("插入输入框") }
+                        }
+                    }
+                }
+            }
         }
     }
 }
