@@ -50,6 +50,8 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    // 为启用 Material 3 Expressive 组件（如 LoadingIndicator），使用 1.5.0-alpha 版本
+    implementation("androidx.compose.material3:material3:1.5.0-alpha07")
     
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.8.5")

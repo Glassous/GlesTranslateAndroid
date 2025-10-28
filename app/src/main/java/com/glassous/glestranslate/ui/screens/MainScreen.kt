@@ -17,11 +17,16 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -31,11 +36,10 @@ import androidx.navigation.NavController
 import com.glassous.glestranslate.data.SelectedLanguage
 import com.glassous.glestranslate.data.PredefinedLanguages
 import com.glassous.glestranslate.data.TranslationHistoryItem
-import com.glassous.glestranslate.ui.components.ExpressiveLoadingIndicator
 import com.glassous.glestranslate.ui.theme.aladinFontFamily
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun MainScreen(
     navController: NavController,
@@ -299,13 +303,30 @@ fun MainScreen(
                                 isTranslating
                             }
                             if (showLoader) {
+                                // 颜色方案：指示器使用 @android:color/system_accent1_600
+                                // 容器使用 @android:color/system_accent1_100
+                                val context = LocalContext.current
+                                val fallbackIndicator = MaterialTheme.colorScheme.primary
+                                val fallbackContainer = MaterialTheme.colorScheme.surfaceVariant
+                                val indicatorColor = remember(context, fallbackIndicator) {
+                                    runCatching {
+                                        Color(ContextCompat.getColor(context, android.R.color.system_accent1_600))
+                                    }.getOrElse { fallbackIndicator }
+                                }
+                                val containerColor = remember(context, fallbackContainer) {
+                                    runCatching {
+                                        Color(ContextCompat.getColor(context, android.R.color.system_accent1_100))
+                                    }.getOrElse { fallbackContainer }
+                                }
+
                                 Box(
                                     modifier = Modifier
                                         .align(Alignment.Center)
                                 ) {
-                                    ExpressiveLoadingIndicator(
-                                        contained = true,
-                                        modifier = Modifier.size(56.dp)
+                                    ContainedLoadingIndicator(
+                                        modifier = Modifier.size(48.dp),
+                                        containerColor = containerColor,
+                                        indicatorColor = indicatorColor
                                     )
                                 }
                             }
