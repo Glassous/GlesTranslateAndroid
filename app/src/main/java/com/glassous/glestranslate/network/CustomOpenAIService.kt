@@ -170,6 +170,7 @@ object CustomOpenAIService {
         val prompt = "请识别这张图片中的文字内容，直接返回识别结果，不要添加任何解释。"
 
         val dataUrl = "data:$imageMime;base64,$imageBase64"
+        // 使用 OpenAI Chat Completions 标准的图像输入结构：image_url
         val payload = buildJsonObject {
             put("model", model)
             put("stream", true)
@@ -178,12 +179,12 @@ object CustomOpenAIService {
                     put("role", "user")
                     put("content", buildJsonArray {
                         add(buildJsonObject {
-                            put("type", "input_text")
+                            put("type", "text")
                             put("text", prompt)
                         })
                         add(buildJsonObject {
-                            put("type", "input_image")
-                            put("image", buildJsonObject {
+                            put("type", "image_url")
+                            put("image_url", buildJsonObject {
                                 put("url", dataUrl)
                             })
                         })

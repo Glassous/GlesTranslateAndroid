@@ -259,7 +259,7 @@ class TranslationViewModel(private val context: Context) : ViewModel() {
 
                     val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                     // 流式输出：增量追加到识别结果
-                    com.glassous.glestranslate.network.CustomOpenAIService.streamRecognizeImage(
+                    val finalText = com.glassous.glestranslate.network.CustomOpenAIService.streamRecognizeImage(
                         baseUrl = cfg.baseUrl,
                         apiKey = cfg.apiKey,
                         model = cfg.multiModalModel,
@@ -267,6 +267,14 @@ class TranslationViewModel(private val context: Context) : ViewModel() {
                         imageMime = mime
                     ) { delta ->
                         _recognitionResult.value += delta
+                    }
+                    // 若多模态服务未返回SSE（常见于服务不支持），回退到内置识别
+                    if (finalText.isBlank() && _recognitionResult.value.isBlank()) {
+                        val fallback = com.glassous.glestranslate.network.OcrService.recognizeImage(
+                            imageBytes = bytes,
+                            filename = filename
+                        )
+                        _recognitionResult.value = fallback
                     }
                 } else {
                     // 内置 API：一次性返回
@@ -305,7 +313,7 @@ class TranslationViewModel(private val context: Context) : ViewModel() {
                     // 解析格式，例如 audio/mpeg -> mpeg
                     val audioFormat = mime.substringAfter('/', missingDelimiterValue = "mpeg")
                     val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                    com.glassous.glestranslate.network.CustomOpenAIService.streamRecognizeAudio(
+                    val finalText = com.glassous.glestranslate.network.CustomOpenAIService.streamRecognizeAudio(
                         baseUrl = cfg.baseUrl,
                         apiKey = cfg.apiKey,
                         model = cfg.multiModalModel,
@@ -313,6 +321,14 @@ class TranslationViewModel(private val context: Context) : ViewModel() {
                         audioFormat = audioFormat
                     ) { delta ->
                         _recognitionResult.value += delta
+                    }
+                    // 若自定义多模态未返回内容（可能不支持音频SSE），回退到内置识别
+                    if (finalText.isBlank() && _recognitionResult.value.isBlank()) {
+                        val fallback = com.glassous.glestranslate.network.OcrService.recognizeAudio(
+                            audioBytes = bytes,
+                            filename = filename
+                        )
+                        _recognitionResult.value = fallback
                     }
                 } else {
                     val result = com.glassous.glestranslate.network.OcrService.recognizeAudio(
